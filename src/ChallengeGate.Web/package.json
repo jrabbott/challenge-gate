@@ -1,0 +1,8 @@
+{
+  "name": "challenge-gate-web",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "govuk-frontend": "^6.1.0"
+  }
+}

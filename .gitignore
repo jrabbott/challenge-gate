@@ -52,3 +52,17 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Environment
+.env
+.env.*
+.idea/
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# Node
+node_modules/
+src/ChallengeGate.Web/wwwroot/lib/govuk-frontend/
+src/ChallengeGate.Web/wwwroot/assets/

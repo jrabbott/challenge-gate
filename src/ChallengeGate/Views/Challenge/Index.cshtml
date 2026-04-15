@@ -1,0 +1,65 @@
+@using ChallengeGate
+@model ChallengeGate.ViewModels.ChallengeViewModel
+@{
+    Layout = Model.Layout;
+    ViewData["Title"] = Model.Title;
+    var hasError = !ViewData.ModelState.IsValid;
+}
+
+<div class="govuk-grid-row">
+    <div class="govuk-grid-column-two-thirds">
+        
+        @if (hasError)
+        {
+            <div class="govuk-error-summary" data-module="govuk-error-summary">
+                <h2 class="govuk-error-summary__title">
+                    There is a problem
+                </h2>
+                <div class="govuk-error-summary__body">
+                    <ul class="govuk-list govuk-error-summary__list">
+                        @foreach (var modelState in ViewData.ModelState.Values)
+                        {
+                            foreach (var error in modelState.Errors)
+                            {
+                                <li>
+                                    <a href="#@Html.IdFor(m => m.Password)" class="govuk-link">@error.ErrorMessage</a>
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+
+        <h1 class="govuk-heading-l">@Model.Title</h1>
+        <p class="govuk-body">@ChallengeGateConstants.ErrorMessages.PasswordRequired to access this service.</p>
+
+        <form method="post" asp-action="@ChallengeGateConstants.ActionName">
+            @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="ReturnUrl" />
+
+            <div class="govuk-form-group @(hasError ? "govuk-form-group--error" : "")">
+                <label class="govuk-label" asp-for="Password">
+                    Password
+                </label>
+                
+                @if (hasError)
+                {
+                    <p id="password-error" class="govuk-error-message">
+                        <span class="govuk-visually-hidden">Error:</span> <span asp-validation-for="Password"></span>
+                    </p>
+                }
+
+                <input class="govuk-input govuk-input--width-20 @(hasError ? "govuk-input--error" : "")" 
+                       asp-for="Password" type="password" 
+                       spellcheck="false" autocomplete="current-password"
+                       aria-describedby="@(hasError ? "password-error" : "")">
+            </div>
+
+            <button type="submit" class="govuk-button" data-module="govuk-button">
+                Continue
+            </button>
+        </form>
+
+    </div>
+</div>
