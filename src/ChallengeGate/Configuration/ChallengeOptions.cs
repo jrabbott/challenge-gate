@@ -12,6 +12,7 @@ public class ChallengeOptions
     public string CookieName { get; set; } = ChallengeGateConstants.Defaults.CookieName;
     public int CookieExpirationMinutes { get; set; } = 60 * 24 * 7;
     public string ChallengePath { get; set; } = ChallengeGateConstants.Defaults.ChallengePath;
+    public string TokenQueryParamName { get; set; } = ChallengeGateConstants.Defaults.TokenQueryParamName;
     public string Layout { get; set; } = ChallengeGateConstants.Defaults.Layout;
     public string Title { get; set; } = ChallengeGateConstants.Defaults.Title;
     public List<string> BypassPaths { get; set; } =

@@ -1,6 +1,8 @@
 using ChallengeGate.Configuration;
+using ChallengeGate.Services;
 using ChallengeGate.Validators;
 using ChallengeGate.ViewModels;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 
 namespace ChallengeGate.Tests.Validators;
@@ -9,33 +11,33 @@ public class ChallengeViewModelValidatorTests
 {
     private const string CorrectPassword = "password123";
 
+    private static ChallengeViewModelValidator CreateValidator(string configuredPassword)
+    {
+        var options = new ChallengeOptions { Password = configuredPassword };
+        var dataProtectionProvider = new EphemeralDataProtectionProvider();
+        var challengeGateService = new ChallengeGateService(Options.Create(options), dataProtectionProvider);
+        return new ChallengeViewModelValidator(challengeGateService);
+    }
+
     [Fact]
     public void Validate_WhenPasswordIsCorrect_ReturnsValid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = CorrectPassword };
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator(CorrectPassword);
         var model = new ChallengeViewModel { Password = CorrectPassword };
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.True(result.IsValid);
     }
 
     [Fact]
     public void Validate_WhenPasswordIsEmpty_ReturnsInvalid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = CorrectPassword };
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator(CorrectPassword);
         var model = new ChallengeViewModel { Password = "" };
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage == "Enter the password");
     }
@@ -43,15 +45,11 @@ public class ChallengeViewModelValidatorTests
     [Fact]
     public void Validate_WhenPasswordIsNull_ReturnsInvalid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = CorrectPassword };
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator(CorrectPassword);
         var model = new ChallengeViewModel { Password = null };
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage == "Enter the password");
     }
@@ -59,15 +57,11 @@ public class ChallengeViewModelValidatorTests
     [Fact]
     public void Validate_WhenPasswordIsIncorrect_ReturnsInvalid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = CorrectPassword };
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator(CorrectPassword);
         var model = new ChallengeViewModel { Password = "wrong-password" };
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage == "The password you entered is incorrect");
     }
@@ -75,15 +69,11 @@ public class ChallengeViewModelValidatorTests
     [Fact]
     public void Validate_WhenPasswordIsIncorrectButSameLength_ReturnsInvalid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = CorrectPassword }; // length 11
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator(CorrectPassword);
         var model = new ChallengeViewModel { Password = "password124" }; // length 11
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage == "The password you entered is incorrect");
     }
@@ -91,15 +81,11 @@ public class ChallengeViewModelValidatorTests
     [Fact]
     public void Validate_WhenConfiguredPasswordIsEmpty_ReturnsInvalid()
     {
-        // Arrange
-        var options = new ChallengeOptions { Password = "" };
-        var validator = new ChallengeViewModelValidator(Options.Create(options));
+        var validator = CreateValidator("");
         var model = new ChallengeViewModel { Password = "some-password" };
 
-        // Act
         var result = validator.Validate(model);
 
-        // Assert
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage == "The password you entered is incorrect");
     }

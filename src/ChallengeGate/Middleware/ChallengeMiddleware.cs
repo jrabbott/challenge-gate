@@ -1,6 +1,7 @@
 using ChallengeGate.Configuration;
-using Microsoft.AspNetCore.DataProtection;
+using ChallengeGate.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace ChallengeGate.Middleware;
@@ -8,10 +9,10 @@ namespace ChallengeGate.Middleware;
 public class ChallengeMiddleware(
     RequestDelegate next,
     IOptions<ChallengeOptions> options,
-    IDataProtectionProvider dataProtectionProvider)
+    IPasswordMatcher passwordMatcher,
+    IChallengeGateAuthenticator authenticator)
 {
     private readonly ChallengeOptions _options = options.Value;
-    private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(ChallengeGateConstants.DataProtectionPurpose);     
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -37,24 +38,29 @@ public class ChallengeMiddleware(
             return;
         }
 
-        if (context.Request.Cookies.TryGetValue(_options.CookieName, out var cookieValue))
+        // Check query string token bypass
+        if (context.Request.Query.TryGetValue(_options.TokenQueryParamName, out var tokenValues))
         {
-            try
+            var token = tokenValues.FirstOrDefault();
+            if (passwordMatcher.Matches(token))
             {
-                // Unprotect the cookie and verify it matches the current password.
-                // If the password was changed in configuration, the existing cookie will fail this check.
-                var unprotectedValue = _protector.Unprotect(cookieValue);
+                authenticator.IssueCookie(context);
+
+                var query = context.Request.Query.ToDictionary(q => q.Key, q => q.Value);
+                query.Remove(_options.TokenQueryParamName);
                 
-                if (unprotectedValue == $"{ChallengeGateConstants.CookieValuePrefix}:{_options.Password}")
-                {
-                    await next(context);
-                    return;
-                }
+                var queryBuilder = new QueryBuilder(query);
+                var redirectUrl = context.Request.PathBase + context.Request.Path + queryBuilder.ToQueryString();
+                
+                context.Response.Redirect(redirectUrl);
+                return;
             }
-            catch
-            {
-                // Ignore malformed, expired, or invalid cookies and fall through to re-authentication.
-            }
+        }
+
+        if (authenticator.IsAuthenticated(context))
+        {
+            await next(context);
+            return;
         }
 
         var returnUrl = context.Request.Path + context.Request.QueryString;

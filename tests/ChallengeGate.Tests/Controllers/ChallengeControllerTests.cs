@@ -1,8 +1,8 @@
 using ChallengeGate.Configuration;
 using ChallengeGate.Controllers;
+using ChallengeGate.Services;
 using ChallengeGate.Validators;
 using ChallengeGate.ViewModels;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -12,33 +12,34 @@ namespace ChallengeGate.Tests.Controllers;
 
 public class ChallengeControllerTests
 {
-    private readonly ChallengeOptions _options;
-    private readonly IDataProtectionProvider _dataProtectionProvider;
     private readonly ChallengeController _controller;
+    private readonly Mock<IPasswordMatcher> _passwordMatcherMock;
+    private readonly Mock<IChallengeGateAuthenticator> _authenticatorMock;
 
     public ChallengeControllerTests()
     {
-        _options = new ChallengeOptions
+        ChallengeOptions options = new()
         {
             Enabled = true,
             Password = "password123",
             Layout = "_CustomLayout",
             Title = "Custom Title"
         };
-        _dataProtectionProvider = new EphemeralDataProtectionProvider();
+        
+        _passwordMatcherMock = new Mock<IPasswordMatcher>();
+        _authenticatorMock = new Mock<IChallengeGateAuthenticator>();
+        
         _controller = new ChallengeController(
-            Options.Create(_options), 
-            new ChallengeViewModelValidator(Options.Create(_options)),
-            _dataProtectionProvider);
+            Options.Create(options), 
+            new ChallengeViewModelValidator(_passwordMatcherMock.Object),
+            _authenticatorMock.Object);
     }
 
     [Fact]
     public void Index_Get_ReturnsViewModel()
     {
-        // Act
         var result = _controller.Index("/return") as ViewResult;
 
-        // Assert
         Assert.NotNull(result);
         var model = Assert.IsType<ChallengeViewModel>(result.Model);
         Assert.Equal("_CustomLayout", model.Layout);
@@ -47,48 +48,32 @@ public class ChallengeControllerTests
     }
 
     [Fact]
-    public void Index_Post_CorrectPassword_SetsSignedCookieAndRedirects()
+    public void Index_Post_CorrectPassword_IssuesCookieAndRedirects()
     {
-        // Arrange
-        var mockResponse = new Mock<HttpResponse>();
-        var mockCookies = new Mock<IResponseCookies>();
-        mockResponse.SetupGet(r => r.Cookies).Returns(mockCookies.Object);
-
         var mockContext = new Mock<HttpContext>();
-        mockContext.SetupGet(c => c.Response).Returns(mockResponse.Object);
-        
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = mockContext.Object
         };
 
         var model = new ChallengeViewModel { Password = "password123", ReturnUrl = "/return" };
+        _passwordMatcherMock.Setup(s => s.Matches("password123")).Returns(true);
 
-        // Act
         var result = _controller.Index(model) as RedirectResult;
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal("/return", result.Url);
-        
-        // Verify that Append was called with a protected value
-        mockCookies.Verify(c => c.Append(
-            _options.CookieName, 
-            It.Is<string>(v => v.Length > 20), // Protected strings are long
-            It.IsAny<CookieOptions>()), 
-            Times.Once);
+        _authenticatorMock.Verify(s => s.IssueCookie(mockContext.Object), Times.Once);
     }
 
     [Fact]
     public void Index_Post_IncorrectPassword_ReturnsViewWithError()
     {
-        // Arrange
         var model = new ChallengeViewModel { Password = "wrong", ReturnUrl = "/return" };
+        _passwordMatcherMock.Setup(s => s.Matches("wrong")).Returns(false);
 
-        // Act
         var result = _controller.Index(model) as ViewResult;
 
-        // Assert
         Assert.NotNull(result);
         Assert.False(_controller.ModelState.IsValid);
         var returnModel = Assert.IsType<ChallengeViewModel>(result.Model);
@@ -99,33 +84,26 @@ public class ChallengeControllerTests
     [Fact]
     public void Index_Post_EmptyPassword_FailsValidation()
     {
-        // Arrange
         var model = new ChallengeViewModel { Password = "", ReturnUrl = "/return" };
 
-        // Act
         var result = _controller.Index(model) as ViewResult;
 
-        // Assert
         Assert.NotNull(result);
         Assert.False(_controller.ModelState.IsValid);
         Assert.True(_controller.ModelState.ContainsKey(nameof(ChallengeViewModel.Password)));
-        Assert.Equal("Enter the password", _controller.ModelState[nameof(ChallengeViewModel.Password)]?.Errors[0].ErrorMessage);
     }
 
     [Fact]
     public void Index_Get_WhenDisabled_Redirects()
     {
-        // Arrange
         var options = new ChallengeOptions { Enabled = false };
         var controller = new ChallengeController(
             Options.Create(options), 
-            new ChallengeViewModelValidator(Options.Create(options)),
-            _dataProtectionProvider);
+            new ChallengeViewModelValidator(_passwordMatcherMock.Object),
+            _authenticatorMock.Object);
 
-        // Act
         var result = controller.Index("/custom-return") as RedirectResult;
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal("/custom-return", result.Url);
     }
@@ -133,18 +111,15 @@ public class ChallengeControllerTests
     [Fact]
     public void Index_Post_WhenDisabled_Redirects()
     {
-        // Arrange
         var options = new ChallengeOptions { Enabled = false };
         var controller = new ChallengeController(
             Options.Create(options), 
-            new ChallengeViewModelValidator(Options.Create(options)),
-            _dataProtectionProvider);
+            new ChallengeViewModelValidator(_passwordMatcherMock.Object),
+            _authenticatorMock.Object);
         var model = new ChallengeViewModel { ReturnUrl = "/custom-return" };
 
-        // Act
         var result = controller.Index(model) as RedirectResult;
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal("/custom-return", result.Url);
     }

@@ -1,8 +1,7 @@
 using ChallengeGate.Configuration;
+using ChallengeGate.Services;
 using ChallengeGate.ViewModels;
 using FluentValidation;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -11,10 +10,9 @@ namespace ChallengeGate.Controllers;
 public class ChallengeController(
     IOptions<ChallengeOptions> options, 
     IValidator<ChallengeViewModel> validator,
-    IDataProtectionProvider dataProtectionProvider) : Controller
+    IChallengeGateAuthenticator authenticator) : Controller
 {
     private readonly ChallengeOptions _options = options.Value;
-    private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(ChallengeGateConstants.DataProtectionPurpose);
 
     [HttpGet]
     public IActionResult Index(string? returnUrl = null)
@@ -57,19 +55,7 @@ public class ChallengeController(
             return View(model);
         }
 
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTimeOffset.UtcNow.AddMinutes(_options.CookieExpirationMinutes)
-        };
-
-        var protectedValue = _protector.Protect($"{ChallengeGateConstants.CookieValuePrefix}:{_options.Password}");
-        
-        // Tie the cookie to the current password. If the password changes in configuration, 
-        // existing cookies will be invalidated by the middleware check.
-        Response.Cookies.Append(_options.CookieName, protectedValue, cookieOptions);
+        authenticator.IssueCookie(HttpContext);
 
         return Redirect(string.IsNullOrEmpty(model.ReturnUrl) ? "/" : model.ReturnUrl);
     }

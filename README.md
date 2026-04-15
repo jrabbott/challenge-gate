@@ -4,6 +4,7 @@ A simple, configurable password challenge gate for .NET MVC applications. Ideal 
 
 ## Key Features
 - **Easy Toggle**: Turn it on or off via configuration (e.g., disable in Production).
+- **URL Token Bypass**: Allow users to bypass the gate by passing a secure token in the query string.
 - **Self-Contained**: Middleware, Controller, and Razor View are all contained within a single Razor Class Library (RCL).
 - **GOV.UK Design System**: Built-in support for GOV.UK Frontend (v6+), ensuring consistency with government standards.
 - **Dynamic Routing**: The challenge page URL is fully configurable and mapped at runtime.
@@ -74,6 +75,7 @@ Add the `ChallengeGate` section to your `appsettings.json`. You can provide diff
     "CookieName": ".ChallengeGate.Auth",
     "CookieExpirationMinutes": 10080,
     "ChallengePath": "/challenge",
+    "TokenQueryParamName": "token",
     "Layout": "_Layout",
     "Title": "Enter password",
     "BypassPaths": [ "/lib", "/css", "/js", "/assets", "/favicon.ico" ]
@@ -88,10 +90,21 @@ Add the `ChallengeGate` section to your `appsettings.json`. You can provide diff
 | `CookieName`              | Name of the authentication cookie.                   | `.ChallengeGate.Auth`                                |
 | `CookieExpirationMinutes` | How long the access lasts before requiring re-entry. | `10080` (1 week)                                     |
 | `ChallengePath`           | The URL path for the challenge form.                 | `/challenge`                                         |
+| `TokenQueryParamName`     | Query parameter name used for URL bypass tokens.     | `token`                                              |
 | `Layout`                  | The Razor layout file the challenge page should use. | `_Layout`                                            |
 | `Title`                   | The page title and `<h1>` for the challenge page.    | `Enter password`                                     |
 | `BypassPaths`             | List of path prefixes that should always be allowed. | `["/lib", "/css", "/js", "/assets", "/favicon.ico"]` |
 
+
+### URL Token Bypass
+You can bypass the gate by appending a `token` query parameter to any URL in your application. If the token matches the configured `Password`, the gate will automatically set the authentication cookie and redirect you to the same URL with the token removed.
+
+**Example:**
+Navigating to `https://yourapp.gov.uk/some-page?token=your-secret-password` will authenticate you and redirect you to `https://yourapp.gov.uk/some-page`.
+
+This is particularly useful for:
+- Sharing specific pages with stakeholders who shouldn't have to see the gate.
+- Automated testing/monitoring of protected environments.
 
 ## Customization
 

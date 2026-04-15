@@ -1,6 +1,6 @@
 using ChallengeGate.Configuration;
 using ChallengeGate.Middleware;
-using Microsoft.AspNetCore.DataProtection;
+using ChallengeGate.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -9,163 +9,202 @@ namespace ChallengeGate.Tests.Middleware;
 
 public class ChallengeMiddlewareTests
 {
-    private readonly Mock<RequestDelegate> _nextMock;
-    private readonly IDataProtectionProvider _dataProtectionProvider;
-    private readonly IDataProtector _protector;
+    private readonly Mock<RequestDelegate> _nextMock = new();
+    private readonly Mock<IPasswordMatcher> _passwordMatcherMock = new();
+    private readonly Mock<IChallengeGateAuthenticator> _authenticatorMock = new();
 
-    public ChallengeMiddlewareTests()
+    private ChallengeMiddleware CreateMiddleware(ChallengeOptions options)
     {
-        _nextMock = new Mock<RequestDelegate>();
-        _dataProtectionProvider = new EphemeralDataProtectionProvider();
-        _protector = _dataProtectionProvider.CreateProtector("ChallengeGate.Auth");
+        return new ChallengeMiddleware(
+            _nextMock.Object, 
+            Options.Create(options), 
+            _passwordMatcherMock.Object,
+            _authenticatorMock.Object);
     }
 
     [Fact]
     public async Task InvokeAsync_WhenDisabled_CallsNext()
     {
-        // Arrange
-        var options = new ChallengeOptions { Enabled = false };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
+        ChallengeOptions options = new() { Enabled = false };
+        var middleware = CreateMiddleware(options);
         var context = new DefaultHttpContext();
 
-        // Act
         await middleware.InvokeAsync(context);
 
-        // Assert
         _nextMock.Verify(n => n(context), Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_WhenRequestIsChallengePath_CallsNext()
     {
-        // Arrange
         var options = new ChallengeOptions { Enabled = true, ChallengePath = "/challenge" };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/challenge";
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/challenge"
+            }
+        };
 
-        // Act
         await middleware.InvokeAsync(context);
 
-        // Assert
         _nextMock.Verify(n => n(context), Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_WhenPathIsBypassed_CallsNext()
     {
-        // Arrange
         var options = new ChallengeOptions 
         { 
             Enabled = true, 
-            BypassPaths = new List<string> { "/css" } 
+            BypassPaths = ["/css"] 
         };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/css/site.css";
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/css/site.css"
+            }
+        };
 
-        // Act
         await middleware.InvokeAsync(context);
 
-        // Assert
+        _nextMock.Verify(n => n(context), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenValidTokenInUrl_IssuesCookieAndRedirects()
+    {
+        var options = new ChallengeOptions 
+        { 
+            Enabled = true, 
+            TokenQueryParamName = "token"
+        };
+        _passwordMatcherMock.Setup(v => v.Matches("correct-password")).Returns(true);
+        
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/secure",
+                QueryString = new QueryString("?token=correct-password")
+            }
+        };
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(302, context.Response.StatusCode);
+        Assert.Equal("/secure", context.Response.Headers["Location"]);
+        _authenticatorMock.Verify(s => s.IssueCookie(context), Times.Once);
+        _nextMock.Verify(n => n(context), Times.Never);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenValidTokenInUrlWithOtherParams_RedirectsKeepingOtherParams()
+    {
+        var options = new ChallengeOptions 
+        { 
+            Enabled = true, 
+            TokenQueryParamName = "token"
+        };
+        _passwordMatcherMock.Setup(v => v.Matches("correct-password")).Returns(true);
+        
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/secure",
+                QueryString = new QueryString("?foo=bar&token=correct-password&baz=qux")
+            }
+        };
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(302, context.Response.StatusCode);
+        var location = context.Response.Headers.Location.ToString();
+        Assert.Contains("foo=bar", location);
+        Assert.Contains("baz=qux", location);
+        Assert.DoesNotContain("token=correct-password", location);
+        _nextMock.Verify(n => n(context), Times.Never);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenInvalidTokenInUrl_RedirectsToChallenge()
+    {
+        var options = new ChallengeOptions 
+        { 
+            Enabled = true, 
+            TokenQueryParamName = "token",
+            ChallengePath = "/challenge"
+        };
+        _passwordMatcherMock.Setup(v => v.Matches("wrong-password")).Returns(false);
+        _authenticatorMock.Setup(s => s.IsAuthenticated(It.IsAny<HttpContext>())).Returns(false);
+        
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/secure",
+                QueryString = new QueryString("?token=wrong-password")
+            }
+        };
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(302, context.Response.StatusCode);
+        Assert.StartsWith("/challenge", context.Response.Headers["Location"].ToString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenAuthorizedByService_CallsNext()
+    {
+        var options = new ChallengeOptions { Enabled = true };
+        _authenticatorMock.Setup(s => s.IsAuthenticated(It.IsAny<HttpContext>())).Returns(true);
+        
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/secure"
+            }
+        };
+
+        await middleware.InvokeAsync(context);
+
         _nextMock.Verify(n => n(context), Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_WhenUnauthorized_RedirectsToChallenge()
     {
-        // Arrange
         var options = new ChallengeOptions 
         { 
             Enabled = true, 
-            ChallengePath = "/challenge",
-            CookieName = "test-cookie"
+            ChallengePath = "/challenge"
         };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/secure";
+        _authenticatorMock.Setup(s => s.IsAuthenticated(It.IsAny<HttpContext>())).Returns(false);
+        
+        var middleware = CreateMiddleware(options);
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Path = "/secure"
+            }
+        };
 
-        // Act
         await middleware.InvokeAsync(context);
 
-        // Assert
         Assert.Equal(302, context.Response.StatusCode);
-        var location = context.Response.Headers["Location"].ToString();
+        var location = context.Response.Headers.Location.ToString();
         Assert.StartsWith("/challenge", location);
         Assert.Contains("returnUrl=%2Fsecure", location);
-        _nextMock.Verify(n => n(context), Times.Never);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_WhenAuthorizedBySignedCookie_CallsNext()
-    {
-        // Arrange
-        var options = new ChallengeOptions 
-        { 
-            Enabled = true, 
-            CookieName = "test-cookie",
-            Password = "correct-password"
-        };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/secure";
-        
-        var protectedValue = _protector.Protect("Authorized:correct-password");
-        context.Request.Headers.Append("Cookie", $"test-cookie={protectedValue}");
-
-        // Act
-        await middleware.InvokeAsync(context);
-
-        // Assert
-        _nextMock.Verify(n => n(context), Times.Once);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_WhenPasswordChanged_RedirectsToChallenge()
-    {
-        // Arrange
-        var options = new ChallengeOptions 
-        { 
-            Enabled = true, 
-            CookieName = "test-cookie",
-            Password = "new-password" // Password has changed
-        };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/secure";
-        
-        // Cookie was created with the OLD password
-        var oldProtectedValue = _protector.Protect("Authorized:old-password");
-        context.Request.Headers.Append("Cookie", $"test-cookie={oldProtectedValue}");
-
-        // Act
-        await middleware.InvokeAsync(context);
-
-        // Assert
-        Assert.Equal(302, context.Response.StatusCode);
-        _nextMock.Verify(n => n(context), Times.Never);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_WhenCookieIsMalformed_RedirectsToChallenge()
-    {
-        // Arrange
-        var options = new ChallengeOptions 
-        { 
-            Enabled = true, 
-            ChallengePath = "/challenge",
-            CookieName = "test-cookie"
-        };
-        var middleware = new ChallengeMiddleware(_nextMock.Object, Options.Create(options), _dataProtectionProvider);
-        var context = new DefaultHttpContext();
-        context.Request.Path = "/secure";
-        context.Request.Headers.Append("Cookie", "test-cookie=some-malformed-nonsense-that-cannot-be-unprotected");
-
-        // Act
-        await middleware.InvokeAsync(context);
-
-        // Assert
-        Assert.Equal(302, context.Response.StatusCode);
         _nextMock.Verify(n => n(context), Times.Never);
     }
 }

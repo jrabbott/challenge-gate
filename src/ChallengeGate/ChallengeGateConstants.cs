@@ -17,6 +17,7 @@ internal static class ChallengeGateConstants
         public const string ChallengePath = "/challenge";
         public const string Layout = "_Layout";
         public const string Title = "Enter password";
+        public const string TokenQueryParamName = "token";
     }
 
     public static class ErrorMessages
